@@ -1,0 +1,223 @@
+//机械臂位置解算——几何法
+#include "stm32f10x.h"
+#include "usart.h"
+#include "delay.h"
+#include "dma.h"
+#include "math.h"
+#include "servo.h"
+
+#define p         3.6
+#define A1        9.4
+#define A2        10.4
+#define A3        14.8
+#define A4        17.8
+#define MIN_ALPHA 0.0
+#define pi        3.14159
+#define k         (pi/180)
+
+float arctan(float a,float b)
+{
+	  double x=a/b;  
+    double m;
+	  float n;
+    m=atan(x);
+    n=m/k;
+	  return n;
+}
+
+float translation(float jiaodu)
+{
+	float zhankongbi;
+	zhankongbi=jiaodu/180*2000+500;
+	return zhankongbi;
+}
+
+
+extern uint8_t RXBuff1[7];		//DMA接收缓冲区
+float RXBuff2[7];		//用于世界坐标和物体坐标的转换
+
+int main(void)
+{	
+	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_3);
+	delay_init();	
+	DMA_Config();
+	UARTx_Config(115200);
+                 TIM_SERVO_Init();
+	
+                 float x,y,z;
+	float length,height;
+	float j1,j2,j3,j4,w,J1,J2,J3,J4;
+	float alpha; //alpha=j2+j3+j4
+	float Y;
+	float L,H;
+	float k1,k2;
+	float E,F;  //E=cos(j3*k) F=sin(j3*k)
+	
+	while(1)
+	{
+		RXBuff2[2]=((float)RXBuff1[2]-73)/3;
+		RXBuff2[3]=(88-(float)RXBuff1[3])/3;
+
+		x=RXBuff2[2];
+	                 y=RXBuff2[3];
+                                  z=0;  //尝试二维平面的抓取
+		Y=y+p;
+		
+		length=sqrt(Y*Y+x*x);
+		height=z;
+		
+		if(length==0)	
+			j1=0;
+		else 
+			j1=arctan(Y,x);
+
+//		printf("%f\n",length);
+//		printf("%f\n",height);
+//		printf("%f\n",x);
+//		printf("%f\n",y);
+		printf("j1=%f\n",j1);
+//                               printf("\n");
+//		printf("\n");
+
+		if(j1<0||j1>180)
+		{
+			printf("error!\n");
+		}
+		
+		
+		for(alpha=180.0;alpha>=MIN_ALPHA;alpha--)
+		{
+			L=length-A4*sin(alpha*k);
+			H=height-A1-A4*cos(alpha*k);
+		
+//	  	                 printf("L=%f\n",L);
+//		                 printf("H=%f\n",H);
+
+			
+			E=(L*L+H*H-A2*A2-A3*A3)/(2*A2*A3);
+			if(E*E>1||E<0)
+			{
+				printf("error!\n");
+				continue;
+			}
+			
+  		                 F=sqrt(1-E*E);
+			
+			printf("E=%f\n",E);
+  	                                  printf("F=%f\n",F);
+
+			
+			j3=arctan(F,E);
+		                // printf("j3=%f\n",j3);
+
+			if(j3<0||j3>90)
+			{
+				printf("error3!\n");
+				continue;
+			}
+			k1=A2+A3*cos(j3*k);
+			k2=A3*sin(j3*k);
+			w=arctan(k2,k1);
+			j2=arctan(L,H)-w;
+			
+			//printf("j2=%f\n",j2);
+			
+			if(j2>90||j2<0)
+			{
+				printf("error2!\n");
+				continue;
+			}
+			
+			
+			j4=alpha-j2-j3;
+			
+			if(j4>90||j4<0)
+			{
+				printf("error4!\n");
+				continue;
+			}
+			
+                                                   printf("j2=%f\n",j2);
+			printf("j3=%f\n",j3);
+			printf("j4=%f\n",j4);
+		                 break;
+			
+		}
+			
+		                 printf("j2=%f\n",j2);
+			printf("j3=%f\n",j3);
+			printf("j4=%f\n",j4);
+		  
+		
+		J1=180.0-j1;
+		J2=j2+85.0;
+		J3=j3+90.0;
+		J4=90.0-j4;
+		
+		//机械臂
+	
+		delay_ms(2000);
+		//6——1号
+		TIM_SetCompare1(TIM2,1500);
+		delay_ms(1000);
+		TIM_SetCompare2(TIM2,1500);
+		delay_ms(1000);		
+		TIM_SetCompare4(TIM1,2500);
+		delay_ms(1000);
+		TIM_SetCompare3(TIM1,1500);
+		delay_ms(1000);
+		TIM_SetCompare1(TIM1,1500);
+		delay_ms(1000);
+		TIM_SetCompare2(TIM1,500);
+		delay_ms(1000);		
+			
+		//6——2号
+		TIM_SetCompare1(TIM2,translation(J1));
+		delay_ms(1000);
+		TIM_SetCompare2(TIM2,translation(J2));
+		delay_ms(1000);
+		TIM_SetCompare4(TIM1,translation(J3));
+		delay_ms(1000);
+		TIM_SetCompare3(TIM1,translation(J4));
+		delay_ms(1000);
+		TIM_SetCompare1(TIM1,1500);
+		delay_ms(1000);	
+		
+		//1号：开——闭——开
+	
+		TIM_SetCompare2(TIM1,1000);  
+		delay_ms(1000);
+		TIM_SetCompare2(TIM1,500);  
+		delay_ms(1000);
+		TIM_SetCompare2(TIM1,1000);  
+		delay_ms(1000); 
+		
+	}
+	
+}
+
+
+
+
+//openmv测试函数
+ //if(RXBuff1[0]==0x2C)
+//	 {
+//                  LED_GPIO_Config();
+//	    printf("%d\n",RXBuff2[0]);
+//                  printf("%d\n",RXBuff2[1]);
+//	    printf("%d\n",RXBuff2[2]);
+//	    printf("%d\n",RXBuff2[3]);
+//	    printf("%d\n",RXBuff2[4]);
+//	    printf("%d\n",RXBuff2[5]);
+//	    printf("%d\n",RXBuff2[6]);
+//		  printf("\n"); 
+//		  printf("\n"); 
+//		 
+//	 }
+
+//1号 PA9 TIM1  2  		 TIM_SetCompare2(TIM1,500);  delay_ms(1000);	TIM_SetCompare2(TIM1,1000);  delay_ms(1000);
+//2号 PA8 TIM1  1      TIM_SetCompare1(TIM1,1500); 90°
+//3号 PA10 TIM1 3     
+//4号 PA11 TIM1 4
+//5号 PB3 TIM2  2
+//6号 PA15 TIM2 1
